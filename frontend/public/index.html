@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Market Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/regression@2.0.1/dist/regression.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <div class="logo-icon">📈</div>
+                <h1>Stock Market Dashboard</h1>
+            </div>
+            <div class="search-container">
+                <input type="text" id="searchInput" placeholder="Search companies...">
+                <button id="searchBtn">Search</button>
+            </div>
+        </header>
+        
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>Top Companies</h2>
+                <button class="refresh-btn" id="refreshBtn">↻</button>
+            </div>
+            <div class="companies-list" id="companiesList">
+                <!-- Companies will be populated here -->
+            </div>
+        </aside>
+        
+        <main class="main-content">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <div class="stock-info">
+                        <h2 id="companyName" style="color: aliceblue;">Select a company</h2>
+                        <div class="stock-price" id="stockPrice">$0.00</div>
+                        <div class="price-change" id="priceChange">+0.00 (0.00%)</div>
+                    </div>
+                    <div class="time-filters">
+                        <button class="time-btn" data-time="1d">1D</button>
+                        <button class="time-btn" data-time="1w">1W</button>
+                        <button class="time-btn active" data-time="1m">1M</button>
+                        <button class="time-btn" data-time="3m">3M</button>
+                        <button class="time-btn" data-time="1y">1Y</button>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="stockChart"></canvas>
+                    <div class="loader" id="chartLoader">
+                        <div class="spinner"></div>
+                        <p>Loading stock data...</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="stats-container">
+                <div class="stat-card">
+                    <h3>52 Week High</h3>
+                    <div class="stat-value" id="weekHigh">$0.00</div>
+                    <div class="stat-desc">Current: <span id="highDiff">0.00%</span> below</div>
+                </div>
+                <div class="stat-card">
+                    <h3>52 Week Low</h3>
+                    <div class="stat-value" id="weekLow">$0.00</div>
+                    <div class="stat-desc">Current: <span id="lowDiff">0.00%</span> above</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Average Volume</h3>
+                    <div class="stat-value" id="avgVolume">0</div>
+                    <div class="stat-desc">Today: <span id="todayVolume">0</span></div>
+                </div>
+            </div>
+            
+            <div class="prediction-container">
+                <div class="prediction-icon">🔮</div>
+                <div class="prediction-content">
+                    <h3>AI-Predicted Next Day Closing Price</h3>
+                    <div class="prediction-value" id="predictedPrice">$0.00</div>
+                    <div class="prediction-change" id="predictionChange">+0.00 (0.00%)</div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // DOM Elements
+const companiesList = document.getElementById('companiesList');
+const companyName = document.getElementById('companyName');
+const stockPrice = document.getElementById('stockPrice');
+const priceChange = document.getElementById('priceChange');
+const weekHigh = document.getElementById('weekHigh');
+const weekLow = document.getElementById('weekLow');
+const highDiff = document.getElementById('highDiff');
+const lowDiff = document.getElementById('lowDiff');
+const avgVolume = document.getElementById('avgVolume');
+const todayVolume = document.getElementById('todayVolume');
+const predictedPrice = document.getElementById('predictedPrice');
+const predictionChange = document.getElementById('predictionChange');
+const chartLoader = document.getElementById('chartLoader');
+const searchInput = document.getElementById('searchInput');
+const searchBtn = document.getElementById('searchBtn');
+const refreshBtn = document.getElementById('refreshBtn');
+const timeButtons = document.querySelectorAll('.time-btn');
+
+// Global variables
+let stockChart = null;
+let currentSymbol = "AAPL";
+let currentData = null;
+let companies = [];
+
+// Initialize the dashboard
+async function initDashboard() {
+    await fetchCompanies();
+    populateCompaniesList();
+    fetchStockData(currentSymbol, "1m");
+    addEventListeners();
+}
+
+// Fetch companies from backend
+async function fetchCompanies() {
+    try {
+        const response = await fetch('http://localhost:3000/api/companies');
+        if (!response.ok) throw new Error('Network response was not ok');
+        companies = await response.json();
+    } catch (error) {
+        console.error('Failed to fetch companies:', error);
+        // Fallback to hardcoded companies
+        companies = [
+            { symbol: "AAPL", name: "Apple Inc." },
+            { symbol: "MSFT", name: "Microsoft Corporation" },
+            { symbol: "GOOGL", name: "Alphabet Inc." },
+            { symbol: "AMZN", name: "Amazon.com Inc." },
+            { symbol: "META", name: "Meta Platforms Inc." },
+            { symbol: "TSLA", name: "Tesla Inc." },
+            { symbol: "JPM", name: "JPMorgan Chase & Co." },
+            { symbol: "JNJ", name: "Johnson & Johnson" },
+            { symbol: "V", name: "Visa Inc." },
+            { symbol: "WMT", name: "Walmart Inc." }
+        ];
+    }
+}
+
+// Populate companies list
+function populateCompaniesList(filter = "") {
+    companiesList.innerHTML = "";
+    
+    const filteredCompanies = filter ? 
+        companies.filter(company => 
+            company.name.toLowerCase().includes(filter.toLowerCase()) || 
+            company.symbol.toLowerCase().includes(filter.toLowerCase())
+        ) : 
+        companies;
+    
+    filteredCompanies.forEach(company => {
+        const companyItem = document.createElement('div');
+        companyItem.className = `company-item ${company.symbol === currentSymbol ? 'active' : ''}`;
+        companyItem.innerHTML = `
+            <div class="company-logo">${company.symbol[0]}</div>
+            <div class="company-info">
+                <h3>${company.name}</h3>
+                <p>${company.symbol}</p>
+            </div>
+            <div class="company-price">$0.00</div>
+        `;
+        companyItem.addEventListener('click', () => {
+            currentSymbol = company.symbol;
+            fetchStockData(company.symbol, getCurrentTimeRange());
+            document.querySelectorAll('.company-item').forEach(item => item.classList.remove('active'));
+            companyItem.classList.add('active');
+        });
+        companiesList.appendChild(companyItem);
+    });
+    
+    fetchAllCompanyPrices();
+}
+
+// Get current selected time range
+function getCurrentTimeRange() {
+    const activeBtn = document.querySelector('.time-btn.active');
+    return activeBtn ? activeBtn.dataset.time : "1m";
+}
+
+// Fetch stock data from backend
+async function fetchStockData(symbol, range) {
+    showLoader();
+    
+    try {
+        // Convert frontend range to backend parameters
+        let interval, period;
+        switch(range) {
+            case "1d": interval = "5m"; period = "1d"; break;
+            case "1w": interval = "30m"; period = "5d"; break;
+            case "1m": interval = "1d"; period = "1mo"; break;
+            case "3m": interval = "1d"; period = "3mo"; break;
+            case "1y": interval = "1wk"; period = "1y"; break;
+            default: interval = "1d"; period = "1mo";
+        }
+
+        const response = await fetch(`http://localhost:3000/api/stock/${symbol}?period=${period}&interval=${interval}`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        
+        const data = await response.json();
+        
+        if (!data || !data.historical) {
+            throw new Error("Invalid data received");
+        }
+        
+        currentData = data;
+        updateStockInfo(data);
+        renderStockChart(data);
+        calculatePrediction(data);
+        
+    } catch (error) {
+        console.error("Error fetching stock data:", error);
+        alert("Failed to fetch stock data. Please try again later.");
+    } finally {
+        hideLoader();
+    }
+}
+
+// Fetch prices for all companies
+async function fetchAllCompanyPrices() {
+    const companyPrices = document.querySelectorAll('.company-price');
+    
+    try {
+        const symbols = companies.map(c => c.symbol).join(',');
+        if (!symbols) return;
+        
+        const response = await fetch(`http://localhost:3000/api/market-data?symbols=${symbols}`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        
+        const marketData = await response.json();
+        
+        companyPrices.forEach((priceElement, index) => {
+            const symbol = companies[index].symbol;
+            const data = marketData[symbol];
+            
+            if (data && data.price !== undefined) {
+                const price = data.price || 0;
+                const change = data.change || 0;
+                priceElement.textContent = `$${price.toFixed(2)}`;
+                priceElement.className = `company-price ${change >= 0 ? 'price-up' : 'price-down'}`;
+            }
+        });
+        
+    } catch (error) {
+        console.error("Error fetching market prices:", error);
+        // Fallback to random prices
+        companyPrices.forEach((priceElement) => {
+            const mockPrice = (150 + Math.random() * 1000).toFixed(2);
+            const isUp = Math.random() > 0.3;
+            priceElement.textContent = `$${mockPrice}`;
+            priceElement.className = `company-price ${isUp ? 'price-up' : 'price-down'}`;
+        });
+    }
+}
+
+// Update stock information
+function updateStockInfo(data) {
+    if (!data) return;
+    
+    companyName.textContent = `${data.name || data.symbol} (${data.symbol})`;
+    stockPrice.textContent = `$${(data.currentPrice || 0).toFixed(2)}`;
+    
+    const previousClose = data.previousClose || data.currentPrice || 0;
+    const change = (data.currentPrice || 0) - previousClose;
+    const changePercent = previousClose ? (change / previousClose * 100).toFixed(2) : "0.00";
+    
+    priceChange.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent}%)`;
+    priceChange.className = `price-change ${change >= 0 ? 'price-up' : 'price-down'}`;
+    
+    weekHigh.textContent = `$${(data.week52High || 0).toFixed(2)}`;
+    weekLow.textContent = `$${(data.week52Low || 0).toFixed(2)}`;
+    
+    const highDiffPercent = data.week52High ? 
+        ((data.week52High - (data.currentPrice || 0)) / data.week52High * 100).toFixed(2) : "0.00";
+    const lowDiffPercent = data.week52Low ? 
+        (((data.currentPrice || 0) - data.week52Low) / data.week52Low * 100).toFixed(2) : "0.00";
+    
+    highDiff.textContent = `${highDiffPercent}%`;
+    lowDiff.textContent = `${lowDiffPercent}%`;
+    
+    avgVolume.textContent = formatNumber(data.avgVolume || 0);
+    todayVolume.textContent = formatNumber(data.volume || 0);
+}
+
+// Render stock chart
+function renderStockChart(data) {
+    const ctx = document.getElementById('stockChart').getContext('2d');
+    
+    if (stockChart) stockChart.destroy();
+    
+    const chartData = {
+        labels: data.historical.map(day => day.date),
+        datasets: [{
+            label: 'Closing Price',
+            data: data.historical.map(day => day.close),
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: true,
+            tension: 0.4
+        }]
+    };
+    
+    stockChart = new Chart(ctx, {
+        type: 'line',
+        data: chartData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: 'rgba(30, 41, 59, 0.9)',
+                    titleFont: { size: 14 },
+                    bodyFont: { size: 13 },
+                    padding: 12,
+                    displayColors: false,
+                    callbacks: {
+                        title: (tooltipItems) => tooltipItems[0].label,
+                        label: (context) => `$${context.parsed.y.toFixed(2)}`
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { color: '#94a3b8' } },
+                y: { 
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    ticks: { 
+                        color: '#94a3b8',
+                        callback: (value) => '$' + value
+                    }
+                }
+            },
+            interaction: {
+                mode: 'nearest',
+                axis: 'x',
+                intersect: false
+            }
+        }
+    });
+}
+
+// Calculate prediction
+function calculatePrediction(data) {
+    if (!data?.historical?.length) {
+        predictedPrice.textContent = "$0.00";
+        predictionChange.textContent = "+0.00 (0.00%)";
+        return;
+    }
+
+    const points = data.historical.map((day, index) => [index, day.close]);
+    const result = regression.linear(points);
+    const nextDayIndex = data.historical.length;
+    const predictedClosingPrice = result.predict(nextDayIndex)[1];
+    
+    const currentPrice = data.currentPrice || 0;
+    const change = predictedClosingPrice - currentPrice;
+    const changePercent = currentPrice ? (change / currentPrice * 100).toFixed(2) : "0.00";
+    
+    predictedPrice.textContent = `$${predictedClosingPrice.toFixed(2)}`;
+    predictionChange.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent}%)`;
+}
+
+// Format numbers
+function formatNumber(num) {
+    if (isNaN(num)) return "0";
+    if (num >= 1e9) return (num / 1e9).toFixed(1) + 'B';
+    if (num >= 1e6) return (num / 1e6).toFixed(1) + 'M';
+    if (num >= 1e3) return (num / 1e3).toFixed(1) + 'K';
+    return num.toString();
+}
+
+// Show/hide loader
+function showLoader() {
+    chartLoader.style.display = 'flex';
+}
+function hideLoader() {
+    chartLoader.style.display = 'none';
+}
+
+// Add event listeners
+function addEventListeners() {
+    timeButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            timeButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            fetchStockData(currentSymbol, button.dataset.time);
+        });
+    });
+    
+    searchBtn.addEventListener('click', () => populateCompaniesList(searchInput.value));
+    searchInput.addEventListener('keyup', (e) => {
+        if (e.key === 'Enter') populateCompaniesList(searchInput.value);
+    });
+    refreshBtn.addEventListener('click', () => fetchStockData(currentSymbol, getCurrentTimeRange()));
+}
+
+// Initialize dashboard
+window.addEventListener('DOMContentLoaded', initDashboard);
+    </script>
+</body>
+</html>
