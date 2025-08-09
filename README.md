@@ -31,8 +31,8 @@ A responsive web application for tracking stock market data with real-time price
    git clone https://github.com/yourusername/stock-market-dashboard.git
 
 
-   cd backend
-npm install
+  cd backend
+npm install express cors yahoo-finance2 axios dotenv
 cp .env.example .env
 node server.js
 
